@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NHCFM Live Market Map</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,sans-serif;font-size:12px;background:#1a3a2a;color:#fff;}
+#header{padding:10px 14px;background:#1a3a2a;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+#header h1{font-size:14px;font-weight:700;}
+#date-select{padding:5px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.1);color:white;font-size:12px;cursor:pointer;}
+#load-btn{padding:5px 14px;border-radius:5px;border:none;background:#1d9e75;color:white;font-size:12px;cursor:pointer;font-weight:600;}
+#load-btn:hover{background:#178a63;}
+#status{font-size:11px;color:rgba(255,255,255,.5);margin-left:auto;}
+#api-setup{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:12px 16px;margin:0 14px 10px;font-size:11px;}
+#api-setup input{width:320px;padding:5px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.1);color:white;font-size:11px;font-family:monospace;}
+#api-setup label{color:rgba(255,255,255,.6);margin-right:6px;}
+.save-key{padding:4px 10px;border-radius:4px;border:none;background:rgba(255,255,255,.2);color:white;font-size:11px;cursor:pointer;margin-left:6px;}
+#canvas-wrap{overflow:auto;background:#888;padding:10px;}
+svg{display:block;}
+.booth{cursor:default;}
+.booth-body{stroke-width:1.5;}
+.blabel{font-family:system-ui;font-size:9px;font-weight:700;fill:#111;pointer-events:none;text-anchor:middle;dominant-baseline:middle;}
+.bsub{font-family:system-ui;font-size:6.5px;fill:#555;pointer-events:none;text-anchor:middle;dominant-baseline:middle;}
+.bempty{fill:rgba(255,255,255,.25);stroke:#ccc;stroke-width:1;stroke-dasharray:3,2;}
+.bname{font-family:system-ui;font-size:7.5px;fill:#222;pointer-events:none;text-anchor:middle;dominant-baseline:middle;font-weight:600;}
+#legend{display:flex;gap:12px;padding:6px 14px;background:rgba(0,0,0,.2);flex-wrap:wrap;}
+.leg{display:flex;align-items:center;gap:4px;font-size:10px;color:rgba(255,255,255,.7);}
+.ld{width:10px;height:10px;border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>🌊 NHCFM Live Market Map</h1>
+  <select id="date-select"><option value="">— Select market date —</option></select>
+  <button id="load-btn" onclick="loadMap()">Load Map</button>
+  <span id="status">Enter your Airtable API key to get started</span>
+</div>
+
+<div id="api-setup">
+  <label>Airtable API Key:</label>
+  <input type="password" id="api-key" placeholder="patXXXXXXXXXXXXXX..." />
+  <button class="save-key" onclick="saveKey()">Save & Load Dates</button>
+  <span style="color:rgba(255,255,255,.4);margin-left:8px;font-size:10px;">Saved locally in your browser only</span>
+</div>
+
+<div id="legend">
+  <div class="leg"><div class="ld" style="background:#1d9e75"></div>Permanent</div>
+  <div class="leg"><div class="ld" style="background:#7f77dd"></div>Rotating</div>
+  <div class="leg"><div class="ld" style="background:#ba7517"></div>Pop-up</div>
+  <div class="leg"><div class="ld" style="background:#d4537e"></div>Community/Activation</div>
+  <div class="leg"><div class="ld" style="background:rgba(255,255,255,.25);border:1px dashed #ccc"></div>Open slot</div>
+</div>
+
+<div id="canvas-wrap">
+<svg id="map" viewBox="0 0 1300 980" width="1300" height="980" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <style>
+    .zl{font-family:system-ui;font-size:8px;font-weight:700;fill:#bbb;letter-spacing:1px;pointer-events:none;}
+    .struct{fill:#d0cdc0;stroke:#aaa;stroke-width:1.5;}
+  </style>
+</defs>
+
+<!-- BACKGROUND -->
+<rect width="1300" height="980" fill="#b8b4aa"/>
+<rect x="0" y="0" width="1300" height="310" fill="#b4b0a6"/>
+
+<!-- MAIN LOT -->
+<polygon id="lot" points="290,310 1082,310 1082,330 1100,330 1100,730 960,900 310,900 175,745 175,310" fill="#e8e5da" stroke="none"/>
+<polyline points="290,310 1082,310 1082,330 1100,330 1100,730 960,900 310,900 175,745 175,310 290,310" fill="none" stroke="#aaa" stroke-width="2" stroke-dasharray="10,5"/>
+
+<!-- PROPERTY LINE LABELS -->
+<text x="686" y="300" class="zl" text-anchor="middle" letter-spacing="4">— PROPERTY LINE —</text>
+<text x="1118" y="560" class="zl" transform="rotate(90,1118,560)" letter-spacing="3">— PROPERTY LINE —</text>
+<text x="635" y="922" class="zl" text-anchor="middle" letter-spacing="4">— PROPERTY LINE —</text>
+<text x="155" y="560" class="zl" transform="rotate(-90,155,560)" letter-spacing="3">— PROPERTY LINE —</text>
+
+<!-- COMMUNITY SPACE -->
+<rect x="20" y="44" width="250" height="210" fill="#e2dfd4" stroke="#bbb" stroke-width="2" stroke-dasharray="6,3" rx="6"/>
+<text x="145" y="138" class="zl" text-anchor="middle" font-size="10" fill="#aaa">COMMUNITY</text>
+<text x="145" y="154" class="zl" text-anchor="middle" font-size="10" fill="#aaa">SPACE</text>
+
+<!-- ENTRANCE WALKWAY -->
+<rect x="284" y="44" width="116" height="262" fill="#e8e0d0" stroke="#ba7517" stroke-width="2" stroke-dasharray="5,3" rx="3"/>
+<text x="342" y="160" class="zl" text-anchor="middle" font-size="8" fill="#ba7517" transform="rotate(-90,342,160)">ENTRANCE WALKWAY</text>
+
+<!-- SIDEWALK -->
+<rect x="400" y="310" width="682" height="28" fill="#d4d0c4" stroke="none"/>
+<text x="740" y="329" class="zl" text-anchor="middle" font-size="8" letter-spacing="5">SIDEWALK</text>
+
+<!-- SHED -->
+<rect x="1082" y="310" width="70" height="90" class="struct" rx="2"/>
+<text x="1117" y="358" font-family="system-ui" font-size="8" fill="#777" text-anchor="middle">SHED</text>
+
+<!-- MEDIAN -->
+<rect x="20" y="258" width="250" height="20" fill="#b8d4a8" stroke="#5a8a48" stroke-width="1" rx="2"/>
+<text x="145" y="272" class="zl" text-anchor="middle" font-size="7" fill="#4a8a3a" letter-spacing="2">MEDIAN</text>
+
+<!-- AISLE GUIDES -->
+<line x1="175" y1="460" x2="1100" y2="460" stroke="#d0cdc0" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="175" y1="580" x2="1100" y2="580" stroke="#d0cdc0" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="175" y1="700" x2="960" y2="700" stroke="#d0cdc0" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="340" y1="338" x2="340" y2="900" stroke="#d0cdc0" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="960" y1="338" x2="960" y2="900" stroke="#d0cdc0" stroke-width="1" stroke-dasharray="4,4"/>
+
+<!-- ZONE LABELS -->
+<text x="690" y="358" class="zl" text-anchor="middle">— NORTH ROW —</text>
+<text x="690" y="472" class="zl" text-anchor="middle">— MIDDLE ROW (ISLAND) —</text>
+<text x="690" y="592" class="zl" text-anchor="middle">— INNER ROW (ISLAND) —</text>
+<text x="690" y="712" class="zl" text-anchor="middle">— SOUTH ROW —</text>
+<text x="1030" y="500" class="zl" text-anchor="middle" transform="rotate(90,1030,500)">E. PERIMETER</text>
+<text x="220" y="500" class="zl" text-anchor="middle" transform="rotate(-90,220,500)">W. PERIMETER</text>
+
+<!-- SCALE BAR -->
+<line x1="980" y1="950" x2="1100" y2="950" stroke="#888" stroke-width="2"/>
+<line x1="980" y1="943" x2="980" y2="957" stroke="#888" stroke-width="2"/>
+<line x1="1040" y1="943" x2="1040" y2="957" stroke="#888" stroke-width="2"/>
+<line x1="1100" y1="943" x2="1100" y2="957" stroke="#888" stroke-width="2"/>
+<text x="1010" y="968" font-family="system-ui" font-size="8" fill="#888" text-anchor="middle">10'</text>
+<text x="1070" y="968" font-family="system-ui" font-size="8" fill="#888" text-anchor="middle">10'</text>
+
+<!-- BOOTHS LAYER — populated dynamically -->
+<g id="booths-layer"></g>
+
+</svg>
+</div>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────
+const BASE_ID  = 'appRCSadqXgAfLwfi';
+const VENDORS_TABLE  = 'tblRp97dmTWlkriMy';
+const MKTDAYS_TABLE  = 'tbleE9fItKppEdnk8';
+const MARKET_ASSIGNMENTS_TABLE = 'tblf38PolarHHf20A';
+const B = 60; // 10ft booth = 60px
+
+// Row layout definitions — where each zone's booths start and how many slots
+const ROW_DEFS = {
+  'North Row':      {slots:9,  startX:365, y:400,  dir:'h', rot:0},
+  'Middle Row':     {slots:7,  startX:420, y:510,  dir:'h', rot:0},
+  'Inner Row':      {slots:7,  startX:420, y:570,  dir:'h', rot:0},
+  'South Row':      {slots:9,  startX:305, y:750,  dir:'h', rot:0},
+  'West Perimeter': {slots:3,  startX:200, y:650,  dir:'v', rot:-30},
+  'East Perimeter': {slots:5,  startX:980, y:400,  dir:'v', rot:15},
+  'West Endcap':    {slots:2,  startX:360, y:510,  dir:'v', rot:0},
+  'East Endcap':    {slots:2,  startX:900, y:510,  dir:'v', rot:0},
+  'Entrance Row':   {slots:4,  startX:310, y:185,  dir:'v', rot:0},
+  'Floater':        {slots:3,  startX:415, y:185,  dir:'v', rot:0},
+  'Community Space':{slots:6,  startX:45,  y:300,  dir:'h', rot:0},
+};
+
+const CAT_FILL = {
+  'Permanent':'#d4f0e4','Rotating':'#e5e4fc','Pop-up':'#faeeda',
+  'Activation':'#fbeaf0','Community':'#fbeaf0',
+};
+const CAT_STROKE = {
+  'Permanent':'#1d9e75','Rotating':'#7f77dd','Pop-up':'#ba7517',
+  'Activation':'#d4537e','Community':'#d4537e',
+};
+
+// ── API KEY ──────────────────────────────────────────
+function getKey(){ return localStorage.getItem('nhcfm_at_key')||''; }
+function saveKey(){
+  var k=document.getElementById('api-key').value.trim();
+  if(!k){alert('Please enter your API key');return;}
+  localStorage.setItem('nhcfm_at_key',k);
+  setStatus('Key saved. Loading dates...');
+  loadDates();
+}
+
+function airtableFetch(url){
+  return fetch('https://api.airtable.com/v0/'+url,{
+    headers:{'Authorization':'Bearer '+getKey(),'Content-Type':'application/json'}
+  }).then(function(r){
+    if(!r.ok)throw new Error('Airtable API error: '+r.status);
+    return r.json();
+  });
+}
+
+function setStatus(msg){ document.getElementById('status').textContent=msg; }
+
+// ── LOAD DATES ───────────────────────────────────────
+function loadDates(){
+  var key=getKey();
+  if(!key){setStatus('Enter your API key above');return;}
+  document.getElementById('api-key').value=key;
+  setStatus('Loading market dates...');
+  // Fetch all market day records, get dates
+  // Fetch all market day records - no field filter so we can see what's available
+  airtableFetch(BASE_ID+'/'+MKTDAYS_TABLE+'?maxRecords=50')
+  .then(function(data){
+    var sel=document.getElementById('date-select');
+    sel.innerHTML='<option value="">— Select market date —</option>';
+    data.records.forEach(function(r){
+      // Try multiple possible field names for the date
+      var dateVal=r.fields['Market Date']||r.fields['Date']||r.fields['date']||r.fields['market_date'];
+      // Log first record fields for debugging
+      if(data.records.indexOf(r)===0) console.log('First record fields:', Object.keys(r.fields));
+      if(dateVal){
+        var opt=document.createElement('option');
+        opt.value=r.id;
+        var d=new Date(dateVal);
+        opt.textContent=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+        sel.appendChild(opt);
+      }
+    });
+    setStatus('Ready — select a date and click Load Map');
+  })
+  .catch(function(e){setStatus('Error loading dates: '+e.message);console.error(e);});
+}
+
+// ── LOAD MAP — reads from Market Assignments ─────────
+function loadMap(){
+  var recId=document.getElementById('date-select').value;
+  if(!recId){alert('Please select a market date');return;}
+  setStatus('Loading vendor assignments...');
+
+  // Fetch Market Assignments filtered by Market Date record ID
+  var filter='FIND("'+recId+'",ARRAYJOIN({Market Date}))';
+  var url=BASE_ID+'/'+MARKET_ASSIGNMENTS_TABLE
+    +'?filterByFormula='+encodeURIComponent(filter)
+    +'&fields[]=Vendor'
+    +'&fields[]=Map+Row'
+    +'&fields[]=Number+of+Tents'
+    +'&fields[]=Zone'
+    +'&fields[]=Payment+Status'
+    +'&fields[]=No-show';
+
+  airtableFetch(url)
+  .then(function(data){
+    if(!data||!data.records.length){
+      setStatus('No assignments found — make sure Market Assignments are populated for this date');
+      renderMap([]);
+      return;
+    }
+    var assignments=data.records;
+    setStatus('Found '+assignments.length+' assignments — loading vendor details...');
+
+    // Get unique vendor IDs
+    var vendorIds=[];
+    assignments.forEach(function(a){
+      var v=a.fields['Vendor'];
+      if(v&&v.length&&vendorIds.indexOf(v[0])===-1)vendorIds.push(v[0]);
+    });
+
+    // Fetch vendor details
+    var vendorFilter='OR('+vendorIds.map(function(id){return 'RECORD_ID()="'+id+'"';}).join(',')+')';
+    return airtableFetch(BASE_ID+'/'+VENDORS_TABLE
+      +'?filterByFormula='+encodeURIComponent(vendorFilter)
+      +'&fields[]=Business+Name'
+      +'&fields[]=Map+Category'
+      +'&fields[]=Default+Tents'
+    ).then(function(vendorData){
+      var vendorMap={};
+      vendorData.records.forEach(function(v){
+        vendorMap[v.id]={
+          name:v.fields['Business Name']||'?',
+          cat:v.fields['Map Category']||'Permanent',
+          tents:v.fields['Default Tents']||1
+        };
+      });
+      var merged=assignments.map(function(a){
+        var vid=a.fields['Vendor']&&a.fields['Vendor'][0];
+        var vendor=vendorMap[vid]||{name:'Unknown',cat:'Permanent',tents:1};
+        return {
+          name:vendor.name,
+          cat:vendor.cat,
+          tents:a.fields['Number of Tents']||vendor.tents,
+          row:a.fields['Map Row']||'Unassigned',
+          zone:a.fields['Zone']||'Main Market',
+          noshow:a.fields['No-show']||false
+        };
+      });
+      setStatus('Loaded '+merged.length+' vendors — rendering map...');
+      renderMap(merged);
+    });
+  })
+  .catch(function(e){setStatus('Error: '+e.message);console.error(e);});
+}
+
+// ── RENDER MAP ───────────────────────────────────────
+function renderMap(vendorRecords){
+  var layer=document.getElementById('booths-layer');
+  layer.innerHTML='';
+
+  // Group vendors by row (data already merged)
+  var byRow={};
+  vendorRecords.forEach(function(v){
+    var row=v.row||'Unassigned';
+    if(!byRow[row])byRow[row]=[];
+    byRow[row].push(v);
+  });
+
+  // Render each row
+  Object.keys(ROW_DEFS).forEach(function(rowName){
+    var def=ROW_DEFS[rowName];
+    var vendors=byRow[rowName]||[];
+    renderRow(layer, rowName, def, vendors);
+  });
+
+  // Render unassigned vendors as a list bottom-right
+  if(byRow['Unassigned']&&byRow['Unassigned'].length){
+    renderUnassigned(layer, byRow['Unassigned']);
+  }
+
+  var date=document.getElementById('date-select').options[document.getElementById('date-select').selectedIndex].text;
+  // Update address line
+  var existing=document.getElementById('map-date-label');
+  if(existing)existing.remove();
+  var t=document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.id='map-date-label';
+  t.setAttribute('x','640');t.setAttribute('y','968');
+  t.setAttribute('font-family','system-ui');t.setAttribute('font-size','11');
+  t.setAttribute('font-weight','700');t.setAttribute('fill','#1d9e75');
+  t.setAttribute('text-anchor','middle');
+  t.textContent='NHCFM — '+date+' · 798 Dover Dr, Newport Beach · 9am–1pm';
+  document.getElementById('map').appendChild(t);
+
+  setStatus('Map loaded for '+date+' · '+vendorRecords.length+' vendors');
+}
+
+function renderRow(layer, rowName, def, vendors){
+  var slots=def.slots;
+  var isHoriz=(def.dir==='h');
+
+  for(var i=0;i<slots;i++){
+    var x,y;
+    if(isHoriz){
+      x=def.startX + i*B;
+      y=def.y;
+    } else {
+      x=def.startX;
+      y=def.y + i*(B+2);
+    }
+
+    var v=vendors[i]||null;
+    var g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform','translate('+x+','+y+') rotate('+def.rot+')');
+
+    var hw=B/2,hh=B/2;
+    var rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('x',-hw);rect.setAttribute('y',-hh);
+    rect.setAttribute('width',B);rect.setAttribute('height',B);
+    rect.setAttribute('rx','2');
+
+    if(v){
+      var fill=CAT_FILL[v.cat]||'#f2efe6';
+      var stroke=CAT_STROKE[v.cat]||'#aaa';
+      rect.setAttribute('fill',fill);
+      rect.setAttribute('stroke',stroke);
+      rect.setAttribute('stroke-width','1.5');
+      g.appendChild(rect);
+
+      // Accent bar
+      var bar=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      bar.setAttribute('x',-hw);bar.setAttribute('y',-hh);
+      bar.setAttribute('width','4');bar.setAttribute('height',B);
+      bar.setAttribute('fill',stroke);bar.setAttribute('rx','1');
+      g.appendChild(bar);
+
+      // Vendor name — word wrap
+      var words=v.name.split(' ');
+      var lines=[''];
+      words.forEach(function(w){
+        var last=lines[lines.length-1];
+        if(!last)lines[lines.length-1]=w;
+        else if((last+' '+w).length<=13)lines[lines.length-1]=last+' '+w;
+        else lines.push(w);
+      });
+      lines=lines.slice(0,3);
+      var startY=-(lines.length-1)*9/2;
+      lines.forEach(function(ln,li){
+        var t=document.createElementNS('http://www.w3.org/2000/svg','text');
+        t.setAttribute('class','bname');
+        t.setAttribute('x','0');t.setAttribute('y',String(startY+li*9));
+        t.textContent=ln.length>14?ln.substring(0,13)+'…':ln;
+        g.appendChild(t);
+      });
+
+      // Category sub
+      var sub=document.createElementNS('http://www.w3.org/2000/svg','text');
+      sub.setAttribute('class','bsub');sub.setAttribute('x','0');sub.setAttribute('y',hh-6);
+      sub.textContent=(v.cat||'').toLowerCase().substring(0,4);
+      g.appendChild(sub);
+
+    } else {
+      // Empty slot
+      rect.setAttribute('class','bempty');
+      g.appendChild(rect);
+      var et=document.createElementNS('http://www.w3.org/2000/svg','text');
+      et.setAttribute('class','bsub');et.setAttribute('x','0');et.setAttribute('y','0');
+      et.setAttribute('fill','#bbb');et.textContent='open';
+      g.appendChild(et);
+    }
+
+    layer.appendChild(g);
+  }
+}
+
+function renderUnassigned(layer, vendors){
+  var t=document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.setAttribute('x','200');t.setAttribute('y','870');
+  t.setAttribute('font-family','system-ui');t.setAttribute('font-size','8');
+  t.setAttribute('fill','#c0392b');t.setAttribute('font-weight','700');
+  t.textContent='⚠ Unassigned: '+vendors.map(function(v){return v.name;}).join(', ');
+  layer.appendChild(t);
+}
+
+// ── INIT ─────────────────────────────────────────────
+var savedKey=getKey();
+if(savedKey){
+  document.getElementById('api-key').value=savedKey;
+  loadDates();
+} else {
+  setStatus('Enter your Airtable API key to get started');
+}
+</script>
+</body>
+</html>
