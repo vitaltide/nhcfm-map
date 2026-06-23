@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NHCFM Market Map</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #888; user-select: none; }
+#toolbar {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 6px 12px; background: #1a3a2a; color: white; z-index: 10; position: relative;
+}
+#toolbar h1 { font-size: 13px; font-weight: 700; margin-right: 4px; }
+.tbtn { padding: 4px 9px; border-radius: 4px; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1); color: white; cursor: pointer; font-size: 11px; }
+.tbtn:hover { background: rgba(255,255,255,.25); }
+.tbtn.active { background: #1d9e75; border-color: #1d9e75; }
+#date-select { padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,.3); background:#fff; color:#111; font-size:11px; cursor:pointer; }
+#load-btn { padding:4px 10px; border-radius:4px; border:none; background:#1d9e75; color:white; font-size:11px; cursor:pointer; font-weight:600; }
+#status { font-size:10px; color:rgba(255,255,255,.45); margin-left:auto; }
+#api-bar { background:rgba(255,255,255,.08); border-bottom:1px solid rgba(255,255,255,.1); padding:5px 12px; display:flex; align-items:center; gap:8px; }
+#api-bar input { width:280px; padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.1); color:white; font-size:11px; font-family:monospace; }
+#api-bar label { font-size:11px; color:rgba(255,255,255,.5); }
+.save-key { padding:3px 9px; border-radius:4px; border:none; background:rgba(255,255,255,.2); color:white; font-size:11px; cursor:pointer; }
+#canvas-wrap { overflow: auto; width: 100vw; height: calc(100vh - 72px); background: #777; }
+svg { display: block; }
+.booth { cursor: grab; }
+.booth:active { cursor: grabbing; }
+.booth-body { stroke-width: 1.5; }
+.booth.selected .booth-body { stroke: #f0a500 !important; stroke-width: 3; }
+.rotate-handle { fill: #f0a500; stroke: white; stroke-width: 1.5; cursor: crosshair; opacity: 0; }
+.booth.selected .rotate-handle { opacity: 1; }
+.blabel { font-family: system-ui; font-size: 8.5px; font-weight: 700; fill: #222; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
+.bsub { font-family: system-ui; font-size: 6.5px; fill: #777; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
+.bempty { fill: rgba(255,255,255,.2); stroke: #ccc; stroke-width: 1; stroke-dasharray: 3,2; }
+#edit-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; align-items:center; justify-content:center; }
+#edit-modal.open { display:flex; }
+#edit-box { background:#fff; border-radius:10px; padding:18px; width:290px; box-shadow:0 8px 32px rgba(0,0,0,.3); }
+#edit-box h4 { font-size:13px; font-weight:600; margin-bottom:10px; }
+#edit-box label { font-size:11px; color:#666; display:block; margin-bottom:3px; }
+#edit-box input, #edit-box select { width:100%; margin-bottom:8px; padding:7px 9px; font-size:12px; border:1px solid #ddd; border-radius:5px; outline:none; }
+.ebtns { display:flex; gap:6px; margin-top:4px; }
+.ebtns button { flex:1; padding:7px; border-radius:5px; border:1px solid #ddd; background:#f5f5f5; cursor:pointer; font-size:12px; }
+.ebtns .ok { background:#1d9e75; color:#fff; border-color:#1d9e75; }
+#legend { display:flex; gap:10px; padding:4px 12px; background:rgba(0,0,0,.15); flex-wrap:wrap; }
+.leg { display:flex; align-items:center; gap:4px; font-size:9px; color:rgba(255,255,255,.6); }
+.ld { width:9px; height:9px; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<!-- TOOLBAR -->
+<div id="toolbar" onmousedown="event.stopPropagation()">
+  <h1>🌊 NHCFM</h1>
+  <select id="date-select"><option value="">— Select date —</option></select>
+  <button id="load-btn" onclick="loadFromAirtable()">↓ Load</button>
+  <span style="color:rgba(255,255,255,.3)">|</span>
+  <select id="add-type" style="padding:4px 6px;border-radius:4px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.1);color:white;font-size:11px;">
+    <option value="booth">10×10 Booth</option>
+    <option value="wc">🚻 WC</option>
+    <option value="trash">🗑 Trash</option>
+    <option value="shed">🏠 Shed</option>
+    <option value="bench">🪑 Bench</option>
+    <option value="table">🪵 Table</option>
+    <option value="umbrella">☂ Umbrella</option>
+  </select>
+  <button class="tbtn" onclick="addItem()">＋ Add</button>
+  <button class="tbtn" onclick="editSelected()">✏️ Label</button>
+  <button class="tbtn" onclick="deleteSelected()">🗑 Delete</button>
+  <button class="tbtn" onclick="rotateSelected(-5)">↺ −5°</button>
+  <button class="tbtn" onclick="rotateSelected(5)">↻ +5°</button>
+  <button class="tbtn" onclick="saveLayout()">💾 Save</button>
+  <button class="tbtn" onclick="resetLayout()">↩ Reset</button>
+  <button class="tbtn" onclick="bakeDefault()">📌 Bake</button>
+  <button class="tbtn" onclick="window.print()">🖨 Print</button>
+  <span id="status" style="margin-left:auto;font-size:10px;color:rgba(255,255,255,.45);">Loading...</span>
+</div>
+
+<!-- API BAR -->
+<div id="api-bar" onmousedown="event.stopPropagation()">
+  <label>Airtable Key:</label>
+  <input type="password" id="api-key" placeholder="patXXXXXXXXXXXXXX..."/>
+  <button class="save-key" onclick="saveKey()">Save & Load Dates</button>
+  <span style="font-size:10px;color:rgba(255,255,255,.3);margin-left:4px;">Saved in browser only</span>
+  <div id="legend" style="margin-left:auto;">
+    <div class="leg"><div class="ld" style="background:#1d9e75"></div>Permanent</div>
+    <div class="leg"><div class="ld" style="background:#7f77dd"></div>Rotating</div>
+    <div class="leg"><div class="ld" style="background:#ba7517"></div>Pop-up</div>
+    <div class="leg"><div class="ld" style="background:#d4537e"></div>Activation</div>
+    <div class="leg"><div class="ld" style="background:rgba(255,255,255,.2);border:1px dashed #ccc"></div>Open</div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div id="edit-modal">
+  <div id="edit-box">
+    <h4 id="edit-title">Edit booth</h4>
+    <label>Vendor name</label>
+    <input id="e-name" placeholder="e.g. Mamma Pasta"/>
+    <label>Category</label>
+    <select id="e-cat">
+      <option value="Permanent">Permanent</option>
+      <option value="Rotating">Rotating</option>
+      <option value="Pop-up">Pop-up</option>
+      <option value="Activation">Activation</option>
+      <option value="utility">Utility</option>
+    </select>
+    <label>Location / row</label>
+    <select id="e-zone">
+      <option value="entrance">Entrance Row</option>
+      <option value="floater">Floater</option>
+      <option value="west">West Perimeter</option>
+      <option value="north">North Row</option>
+      <option value="endcap_w">West Endcap</option>
+      <option value="middle">Middle Row</option>
+      <option value="inner">Inner Row</option>
+      <option value="endcap_e">East Endcap</option>
+      <option value="east">East Perimeter</option>
+      <option value="south">South Row</option>
+      <option value="community">Community Space</option>
+      <option value="wc">WC</option>
+      <option value="trash">Trash</option>
+      <option value="shed">Shed</option>
+      <option value="bench">Bench</option>
+      <option value="table">Table</option>
+      <option value="umbrella">Umbrella</option>
+      <option value="default">Other</option>
+    </select>
+    <label>Notes</label>
+    <input id="e-notes" placeholder="e.g. 2 tents, corner spot"/>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <div style="flex:1"><label>Width (ft)</label><input id="e-width" type="number" min="5" max="100"/></div>
+      <div style="flex:1"><label>Depth (ft)</label><input id="e-height" type="number" min="5" max="100"/></div>
+    </div>
+    <div class="ebtns">
+      <button onclick="closeEdit()">Cancel</button>
+      <button class="ok" onclick="confirmEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAP -->
+<div id="canvas-wrap">
+<svg id="map" viewBox="0 0 1300 980" width="1300" height="980" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <style>
+    .zl { font-family:system-ui; font-size:8px; font-weight:700; fill:#b0a888; letter-spacing:1px; pointer-events:none; }
+    .struct { fill:#d0cdc0; stroke:#aaa; stroke-width:1.5; }
+  </style>
+</defs>
+
+<!-- ── BACKGROUND ── -->
+<defs>
+  <radialGradient id="treeGrad" cx="50%" cy="40%" r="50%">
+    <stop offset="0%" style="stop-color:#7aaa5a;stop-opacity:1"/>
+    <stop offset="100%" style="stop-color:#3d6b2a;stop-opacity:1"/>
+  </radialGradient>
+  <radialGradient id="treeGrad2" cx="50%" cy="40%" r="50%">
+    <stop offset="0%" style="stop-color:#6a9e4e;stop-opacity:1"/>
+    <stop offset="100%" style="stop-color:#2e5520;stop-opacity:1"/>
+  </radialGradient>
+</defs>
+
+<!-- Surrounding ground -->
+<rect width="1300" height="980" fill="#8a9a7a"/>
+
+<!-- Parking lot area (top) -->
+<rect x="0" y="0" width="1300" height="310" fill="#9a9a8e"/>
+
+<!-- Sidewalk behind entrance row (runs along the top of the lot) -->
+<rect x="175" y="270" width="1020" height="42" fill="#c8c4b4" stroke="none"/>
+<text x="680" y="297" class="zl" text-anchor="middle" font-size="7" fill="#aaa" letter-spacing="4">SIDEWALK</text>
+
+<!-- LOT — warmer asphalt tone -->
+<polygon id="lot" points="290,310 1082,310 1082,330 1100,330 1100,730 960,900 310,900 175,745 175,310" fill="#d8d4c4" stroke="none"/>
+
+<!-- Lot inner surface - slight warmth -->
+<polygon points="295,318 1077,318 1077,334 1095,334 1095,726 956,894 314,894 181,749 181,318" fill="#e4e0d0" stroke="none"/>
+
+<!-- Property line dashes -->
+<polyline points="290,310 1082,310 1082,330 1100,330 1100,730 960,900 310,900 175,745 175,310 290,310" fill="none" stroke="#b8b0a0" stroke-width="2" stroke-dasharray="10,5"/>
+
+<!-- PROPERTY LINE LABELS -->
+<text x="686" y="300" class="zl" text-anchor="middle" letter-spacing="4" fill="#c8c0b0">— PROPERTY LINE —</text>
+<text x="1118" y="560" class="zl" transform="rotate(90,1118,560)" letter-spacing="3" fill="#c8c0b0">— PROPERTY LINE —</text>
+<text x="635" y="922" class="zl" text-anchor="middle" letter-spacing="4" fill="#c8c0b0">— PROPERTY LINE —</text>
+<text x="155" y="560" class="zl" transform="rotate(-90,155,560)" letter-spacing="3" fill="#c8c0b0">— PROPERTY LINE —</text>
+
+<!-- ── TREES (from aerial) ── -->
+<!-- Top-left cluster near entrance (between community space and entrance) -->
+<circle cx="165" cy="245" r="38" fill="url(#treeGrad)" opacity=".92"/>
+<circle cx="145" cy="215" r="28" fill="url(#treeGrad2)" opacity=".85"/>
+<circle cx="218" cy="230" r="22" fill="url(#treeGrad)" opacity=".8"/>
+<!-- Tree shadows -->
+<ellipse cx="178" cy="265" rx="36" ry="14" fill="#2a3a1a" opacity=".18"/>
+<ellipse cx="148" cy="232" rx="26" ry="10" fill="#2a3a1a" opacity=".15"/>
+
+<!-- Bottom-left big cluster -->
+<circle cx="105" cy="760" r="52" fill="url(#treeGrad)" opacity=".93"/>
+<circle cx="155" cy="800" r="40" fill="url(#treeGrad2)" opacity=".88"/>
+<circle cx="75"  cy="820" r="34" fill="url(#treeGrad)" opacity=".85"/>
+<circle cx="130" cy="860" r="30" fill="url(#treeGrad2)" opacity=".82"/>
+<circle cx="185" cy="850" r="24" fill="url(#treeGrad)" opacity=".78"/>
+<!-- Shadows -->
+<ellipse cx="120" cy="782" rx="48" ry="18" fill="#1a2a0a" opacity=".2"/>
+<ellipse cx="165" cy="820" rx="38" ry="14" fill="#1a2a0a" opacity=".18"/>
+
+<!-- Bottom-right cluster -->
+<circle cx="1090" cy="840" r="46" fill="url(#treeGrad)" opacity=".92"/>
+<circle cx="1140" cy="870" r="36" fill="url(#treeGrad2)" opacity=".87"/>
+<circle cx="1060" cy="880" r="28" fill="url(#treeGrad)" opacity=".83"/>
+<!-- Shadows -->
+<ellipse cx="1100" cy="858" rx="44" ry="16" fill="#1a2a0a" opacity=".2"/>
+
+<!-- Right side scattered trees -->
+<circle cx="1175" cy="400" r="28" fill="url(#treeGrad)" opacity=".8"/>
+<circle cx="1200" cy="450" r="22" fill="url(#treeGrad2)" opacity=".75"/>
+<circle cx="1185" cy="510" r="25" fill="url(#treeGrad)" opacity=".78"/>
+
+<!-- Top-right near church -->
+<circle cx="1160" cy="160" r="32" fill="url(#treeGrad)" opacity=".82"/>
+<circle cx="1210" cy="140" r="24" fill="url(#treeGrad2)" opacity=".78"/>
+
+<!-- COMMUNITY SPACE — warmer tone -->
+<rect x="20" y="44" width="250" height="210" fill="#ddd8c8" stroke="#c0b898" stroke-width="2" stroke-dasharray="6,3" rx="6"/>
+<text x="145" y="138" class="zl" text-anchor="middle" font-size="10" fill="#a09880">COMMUNITY</text>
+<text x="145" y="154" class="zl" text-anchor="middle" font-size="10" fill="#a09880">SPACE</text>
+
+<!-- ENTRANCE WALKWAY -->
+<rect x="284" y="44" width="116" height="228" fill="#e8e0ce" stroke="#ba7517" stroke-width="2" stroke-dasharray="5,3" rx="3"/>
+<text x="342" y="148" class="zl" text-anchor="middle" font-size="8" fill="#ba7517" transform="rotate(-90,342,148)">ENTRANCE WALKWAY</text>
+
+<!-- SHED -->
+<rect x="1082" y="310" width="70" height="90" fill="#c8c4b4" stroke="#a8a090" stroke-width="1.5" rx="2"/>
+<text x="1117" y="358" font-family="system-ui" font-size="8" fill="#888" text-anchor="middle">SHED</text>
+
+<!-- MEDIAN — vibrant green strip -->
+<rect x="20" y="258" width="250" height="18" fill="#7ab858" stroke="#4a8a2a" stroke-width="1" rx="3"/>
+<text x="145" y="271" class="zl" text-anchor="middle" font-size="7" fill="#fff" letter-spacing="2">MEDIAN</text>
+
+<!-- AISLES -->
+<line x1="175" y1="460" x2="1100" y2="460" stroke="#c8c0a8" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="175" y1="580" x2="1100" y2="580" stroke="#c8c0a8" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="175" y1="700" x2="960" y2="700" stroke="#c8c0a8" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="340" y1="338" x2="340" y2="900" stroke="#c8c0a8" stroke-width="1" stroke-dasharray="4,4"/>
+<line x1="960" y1="338" x2="960" y2="900" stroke="#c8c0a8" stroke-width="1" stroke-dasharray="4,4"/>
+
+<!-- ZONE LABELS -->
+<text x="690" y="358" class="zl" text-anchor="middle">— NORTH ROW —</text>
+<text x="690" y="472" class="zl" text-anchor="middle">— MIDDLE ROW (ISLAND) —</text>
+<text x="690" y="592" class="zl" text-anchor="middle">— INNER ROW (ISLAND) —</text>
+<text x="690" y="712" class="zl" text-anchor="middle">— SOUTH ROW —</text>
+<text x="1030" y="500" class="zl" text-anchor="middle" transform="rotate(90,1030,500)">E. PERIMETER</text>
+<text x="220" y="500" class="zl" text-anchor="middle" transform="rotate(-90,220,500)">W. PERIMETER</text>
+
+<!-- SCALE BAR -->
+<line x1="980" y1="950" x2="1100" y2="950" stroke="#888" stroke-width="2"/>
+<line x1="980" y1="943" x2="980" y2="957" stroke="#888" stroke-width="2"/>
+<line x1="1040" y1="943" x2="1040" y2="957" stroke="#888" stroke-width="2"/>
+<line x1="1100" y1="943" x2="1100" y2="957" stroke="#888" stroke-width="2"/>
+<text x="1010" y="968" font-family="system-ui" font-size="8" fill="#888" text-anchor="middle">10'</text>
+<text x="1070" y="968" font-family="system-ui" font-size="8" fill="#888" text-anchor="middle">10'</text>
+
+<g id="booths-layer"></g>
+</svg>
+</div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────
+const BASE_ID  = 'appRCSadqXgAfLwfi';
+const VENDORS_TBL = 'tblRp97dmTWlkriMy';
+const MKTDAYS_TBL = 'tbleE9fItKppEdnk8';
+const MKTASSIGN_TBL = 'tblf38PolarHHf20A';
+const B = 60; // 10ft = 60px
+
+const ROW_DEFS = {
+  'North Row':      {slots:9,  startX:365, y:400,  dir:'h', rot:0},
+  'Middle Row':     {slots:7,  startX:420, y:510,  dir:'h', rot:0},
+  'Inner Row':      {slots:7,  startX:420, y:570,  dir:'h', rot:0},
+  'South Row':      {slots:9,  startX:305, y:750,  dir:'h', rot:0},
+  'West Perimeter': {slots:3,  startX:200, y:650,  dir:'v', rot:-30},
+  'East Perimeter': {slots:5,  startX:980, y:400,  dir:'v', rot:15},
+  'West Endcap':    {slots:2,  startX:360, y:510,  dir:'v', rot:0},
+  'East Endcap':    {slots:2,  startX:900, y:510,  dir:'v', rot:0},
+  'Entrance Row':   {slots:4,  startX:310, y:68,   dir:'v', rot:0},
+  'Floater':        {slots:3,  startX:200, y:68,   dir:'v', rot:0},
+  'Community Space':{slots:6,  startX:25,  y:300,  dir:'h', rot:0},
+};
+
+const CAT_FILL = {
+  'Permanent':'#d4f0e4','Rotating':'#e5e4fc','Pop-up':'#faeeda',
+  'Activation':'#fbeaf0','Community':'#fbeaf0',
+  'wc':'#c8d8e8','trash':'#ddd8cc','shed':'#d0cdc0',
+  'bench':'#e8d4b8','table':'#f0e8d0','umbrella':'#ddeeff','default':'#f2efe6'
+};
+const CAT_STROKE = {
+  'Permanent':'#1d9e75','Rotating':'#7f77dd','Pop-up':'#ba7517',
+  'Activation':'#d4537e','Community':'#d4537e',
+  'wc':'#88aabb','trash':'#999','shed':'#888',
+  'bench':'#b8845a','table':'#c8a870','umbrella':'#378add','default':'#aaa'
+};
+const UTIL_ZONES = ['wc','trash','shed','bench','table','umbrella','median'];
+const ZONE_ICON  = {wc:'🚻',trash:'🗑',shed:'🏠',bench:'🪑',table:'🪵',umbrella:'☂',median:'🌿'};
+
+// ── STATE ────────────────────────────────────────────────
+const SVG   = document.getElementById('map');
+const LAYER = document.getElementById('booths-layer');
+let booths=[], selected=null, multiSelected=[], dragging=null, dragOffset={x:0,y:0}, rotating=null, nextId=500, editingId=null;
+
+// ── ZONE FILL/STROKE helper ──────────────────────────────
+function getFill(b){
+  if(UTIL_ZONES.includes(b.zone)) return CAT_FILL[b.zone]||'#f2efe6';
+  return CAT_FILL[b.cat]||CAT_FILL['default'];
+}
+function getStroke(b){
+  if(UTIL_ZONES.includes(b.zone)) return CAT_STROKE[b.zone]||'#aaa';
+  return CAT_STROKE[b.cat]||CAT_STROKE['default'];
+}
+
+// ── CREATE / RENDER BOOTH ────────────────────────────────
+function createBooth(cfg){
+  const b={
+    id:cfg.id||'b'+(nextId++), label:cfg.label||'', cat:cfg.cat||'Permanent',
+    zone:cfg.zone||'default', notes:cfg.notes||'', group:cfg.group||'',
+    x:cfg.x, y:cfg.y, rot:cfg.rot||0, w:cfg.w||B, h:cfg.h||B
+  };
+  booths.push(b); renderBooth(b); return b;
+}
+
+function renderBooth(b){
+  const old=document.getElementById('b-'+b.id); if(old)old.remove();
+  const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.id='b-'+b.id; g.setAttribute('class','booth'); g.setAttribute('data-id',b.id);
+  g.setAttribute('transform',`translate(${b.x},${b.y}) rotate(${b.rot})`);
+  const hw=b.w/2, hh=b.h/2;
+  const fill=getFill(b), stroke=getStroke(b);
+  const isUtil=UTIL_ZONES.includes(b.zone);
+
+  // Body
+  const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  rect.setAttribute('class','booth-body');
+  rect.setAttribute('x',-hw); rect.setAttribute('y',-hh);
+  rect.setAttribute('width',b.w); rect.setAttribute('height',b.h);
+  rect.setAttribute('rx','2'); rect.setAttribute('fill',fill); rect.setAttribute('stroke',stroke);
+  g.appendChild(rect);
+
+  if(isUtil){
+    // Icon + label for utilities
+    const icon=ZONE_ICON[b.zone]||'';
+    if(icon){
+      const ico=document.createElementNS('http://www.w3.org/2000/svg','text');
+      ico.setAttribute('x','0'); ico.setAttribute('y',b.label?'-4':'4');
+      ico.setAttribute('text-anchor','middle'); ico.setAttribute('font-size','12');
+      ico.setAttribute('pointer-events','none'); ico.textContent=icon;
+      g.appendChild(ico);
+    }
+    if(b.label){
+      const lt=document.createElementNS('http://www.w3.org/2000/svg','text');
+      lt.setAttribute('class','blabel'); lt.setAttribute('x','0'); lt.setAttribute('y','8');
+      lt.setAttribute('font-size','7'); lt.textContent=b.label.length>14?b.label.substring(0,13)+'…':b.label;
+      g.appendChild(lt);
+    }
+    const sz=document.createElementNS('http://www.w3.org/2000/svg','text');
+    sz.setAttribute('class','bsub'); sz.setAttribute('x','0'); sz.setAttribute('y',hh-4);
+    sz.setAttribute('font-size','6'); sz.textContent=Math.round(b.w/6)+"'×"+Math.round(b.h/6)+"'";
+    g.appendChild(sz);
+  } else {
+    // Accent bar
+    const bar=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    bar.setAttribute('x',-hw); bar.setAttribute('y',-hh);
+    bar.setAttribute('width','4'); bar.setAttribute('height',b.h);
+    bar.setAttribute('fill',stroke); bar.setAttribute('rx','1');
+    bar.setAttribute('pointer-events','none'); g.appendChild(bar);
+
+    // Label lines
+    const display=b.label||'·';
+    const words=display.split(' '); let lines=[''];
+    words.forEach(w=>{
+      const last=lines[lines.length-1];
+      if(!last)lines[lines.length-1]=w;
+      else if((last+' '+w).length<=13)lines[lines.length-1]=last+' '+w;
+      else lines.push(w);
+    });
+    lines=lines.slice(0,3);
+    const startY=-(lines.length-1)*10/2;
+    lines.forEach((ln,i)=>{
+      const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('class','blabel'); t.setAttribute('x','0'); t.setAttribute('y',String(startY+i*10));
+      t.textContent=ln.length>14?ln.substring(0,13)+'…':ln; g.appendChild(t);
+    });
+
+    // Cat sub
+    const sub=document.createElementNS('http://www.w3.org/2000/svg','text');
+    sub.setAttribute('class','bsub'); sub.setAttribute('x','0'); sub.setAttribute('y',hh-6);
+    sub.textContent=(typeof b.cat==='string'?b.cat:'Permanent').toLowerCase().substring(0,4);
+    g.appendChild(sub);
+  }
+
+  // Rotate handle
+  const rh=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  rh.setAttribute('class','rotate-handle'); rh.setAttribute('cx',hw); rh.setAttribute('cy',-hh);
+  rh.setAttribute('r','8'); rh.setAttribute('data-rotate','1'); g.appendChild(rh);
+  const ri=document.createElementNS('http://www.w3.org/2000/svg','text');
+  ri.setAttribute('x',hw); ri.setAttribute('y',-hh+4);
+  ri.setAttribute('text-anchor','middle'); ri.setAttribute('font-size','10');
+  ri.setAttribute('fill','white'); ri.setAttribute('pointer-events','none');
+  ri.textContent='↻'; g.appendChild(ri);
+
+  g.addEventListener('mousedown',onMouseDown);
+  g.addEventListener('dblclick',onDblClick);
+  LAYER.appendChild(g);
+}
+
+// ── INTERACTION ─────────────────────────────────────────
+function getSVGPt(e){
+  const pt=SVG.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+  return pt.matrixTransform(SVG.getScreenCTM().inverse());
+}
+
+function selectBooth(id){
+  document.querySelectorAll('.booth.selected').forEach(el=>el.classList.remove('selected'));
+  selected=id;
+  SVG.setAttribute('data-selected',id||'');
+  if(id){const el=document.getElementById('b-'+id);if(el){el.classList.add('selected');LAYER.appendChild(el);}}
+}
+
+function onMouseDown(e){
+  e.stopPropagation();
+  const id=e.currentTarget.getAttribute('data-id');
+  SVG.setAttribute('data-selected',id);
+  if(e.shiftKey){
+    if(multiSelected.includes(id)){
+      multiSelected=multiSelected.filter(x=>x!==id);
+      document.getElementById('b-'+id).classList.remove('selected');
+    } else {
+      multiSelected.push(id);
+      if(selected&&!multiSelected.includes(selected))multiSelected.push(selected);
+      document.getElementById('b-'+id).classList.add('selected');
+    }
+    selected=id; return;
+  }
+  multiSelected.forEach(mid=>{const el=document.getElementById('b-'+mid);if(el)el.classList.remove('selected');});
+  multiSelected=[];
+  selectBooth(id);
+  if(e.target.getAttribute('data-rotate')){rotating=id;}
+  else{
+    dragging=id;
+    const b=booths.find(x=>x.id===id);
+    const pt=getSVGPt(e); dragOffset={x:pt.x-b.x,y:pt.y-b.y};
+  }
+}
+function onDblClick(e){e.stopPropagation();openEdit(e.currentTarget.getAttribute('data-id'));}
+
+SVG.addEventListener('mousedown',e=>{
+  if(!e.target.closest('.booth')){
+    multiSelected.forEach(mid=>{const el=document.getElementById('b-'+mid);if(el)el.classList.remove('selected');});
+    multiSelected=[]; selectBooth(null);
+  }
+});
+
+document.addEventListener('mousemove',e=>{
+  if(dragging){
+    const pt=getSVGPt(e); const b=booths.find(x=>x.id===dragging);
+    const dx=pt.x-dragOffset.x-b.x, dy=pt.y-dragOffset.y-b.y;
+    b.x+=dx; b.y+=dy;
+    document.getElementById('b-'+dragging).setAttribute('transform',`translate(${b.x},${b.y}) rotate(${b.rot})`);
+    if(multiSelected.length>1){
+      multiSelected.forEach(mid=>{if(mid===dragging)return;const mb=booths.find(x=>x.id===mid);if(!mb)return;mb.x+=dx;mb.y+=dy;document.getElementById('b-'+mid).setAttribute('transform',`translate(${mb.x},${mb.y}) rotate(${mb.rot})`);});
+    }
+  }
+  if(rotating){
+    const pt=getSVGPt(e); const b=booths.find(x=>x.id===rotating);
+    let a=Math.atan2(pt.y-b.y,pt.x-b.x)*180/Math.PI+45;
+    b.rot=Math.round(a/5)*5;
+    document.getElementById('b-'+rotating).setAttribute('transform',`translate(${b.x},${b.y}) rotate(${b.rot})`);
+  }
+});
+document.addEventListener('mouseup',()=>{if(dragging||rotating)autosave();dragging=null;rotating=null;});
+document.addEventListener('keydown',e=>{
+  if((e.key==='Delete'||e.key==='Backspace')&&!editingId&&document.activeElement===document.body)deleteSelected();
+});
+
+// ── TOOLBAR ACTIONS ──────────────────────────────────────
+function rotateSelected(deg){
+  const selEl=document.querySelector('.booth.selected'); if(!selEl)return;
+  const sel=selEl.getAttribute('data-id');
+  const b=booths.find(x=>x.id===sel); if(!b)return;
+  b.rot=((b.rot||0)+deg+360)%360;
+  document.getElementById('b-'+sel).setAttribute('transform',`translate(${b.x},${b.y}) rotate(${b.rot})`);
+  autosave();
+}
+
+function deleteSelected(){
+  const selEl=document.querySelector('.booth.selected');
+  const targets=multiSelected.length>1?multiSelected:(selEl?[selEl.getAttribute('data-id')]:[]);
+  if(!targets.length){alert('Click a booth first.');return;}
+  if(!confirm('Remove '+targets.length+' booth(s)?'))return;
+  targets.forEach(id=>{booths=booths.filter(x=>x.id!==id);const el=document.getElementById('b-'+id);if(el)el.remove();});
+  selected=null; multiSelected=[]; autosave();
+}
+
+function addItem(){
+  multiSelected.forEach(mid=>{const el=document.getElementById('b-'+mid);if(el)el.classList.remove('selected');}); multiSelected=[];
+  if(selected){const sel=document.getElementById('b-'+selected);if(sel)sel.classList.remove('selected');selected=null;}
+  const type=document.getElementById('add-type').value;
+  const DEFS={
+    booth:{zone:'default',w:60,h:60,cat:'Permanent',label:''},
+    wc:{zone:'wc',w:50,h:36,cat:'utility',label:'WC'},
+    trash:{zone:'trash',w:46,h:30,cat:'utility',label:'Trash'},
+    shed:{zone:'shed',w:72,h:90,cat:'utility',label:'Shed'},
+    bench:{zone:'bench',w:72,h:20,cat:'utility',label:'Bench'},
+    table:{zone:'table',w:72,h:36,cat:'utility',label:'Table'},
+    umbrella:{zone:'umbrella',w:36,h:36,cat:'utility',label:''},
+  };
+  const d=DEFS[type]||DEFS.booth;
+  const wrap=document.getElementById('canvas-wrap');
+  const pt=SVG.createSVGPoint();
+  pt.x=wrap.getBoundingClientRect().left+wrap.clientWidth/2;
+  pt.y=wrap.getBoundingClientRect().top+wrap.clientHeight/2;
+  const svgPt=pt.matrixTransform(SVG.getScreenCTM().inverse());
+  const b=createBooth({...d,x:svgPt.x,y:svgPt.y,rot:0});
+  selectBooth(b.id); autosave();
+}
+
+function editSelected(){
+  const selEl=document.querySelector('.booth.selected');
+  if(multiSelected.length>1){openEdit(multiSelected[0]);return;}
+  if(selEl){openEdit(selEl.getAttribute('data-id'));return;}
+  alert('Click a booth to select it first.');
+}
+
+// ── EDIT MODAL ────────────────────────────────────────────
+function openEdit(id){
+  editingId=id;
+  const b=booths.find(x=>x.id===id); if(!b)return;
+  document.getElementById('edit-title').textContent=multiSelected.length>1?'Edit '+multiSelected.length+' booths':'Edit booth';
+  document.getElementById('e-name').value=(b.label&&b.label!=='☂')?b.label:'';
+  document.getElementById('e-cat').value=b.cat||'Permanent';
+  const zo=document.getElementById('e-zone');
+  const opt=zo.querySelector('option[value="'+b.zone+'"]');
+  zo.value=opt?b.zone:'default';
+  document.getElementById('e-notes').value=b.notes||'';
+  document.getElementById('e-width').value=Math.round((b.w||60)/6);
+  document.getElementById('e-height').value=Math.round((b.h||60)/6);
+  document.getElementById('edit-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('e-name').focus(),50);
+}
+function closeEdit(){editingId=null;document.getElementById('edit-modal').classList.remove('open');}
+function confirmEdit(){
+  if(!editingId)return;
+  const name=document.getElementById('e-name').value.trim();
+  const cat=document.getElementById('e-cat').value;
+  const zone=document.getElementById('e-zone').value;
+  const notes=document.getElementById('e-notes').value.trim();
+  const wft=parseFloat(document.getElementById('e-width').value);
+  const hft=parseFloat(document.getElementById('e-height').value);
+  const eid=editingId;
+  const targets=multiSelected.length>1?multiSelected:[editingId];
+  targets.forEach(tid=>{
+    const b=booths.find(x=>x.id===tid); if(!b)return;
+    if(tid===editingId||name)b.label=name;
+    b.cat=cat; b.zone=zone; if(notes)b.notes=notes;
+    if(!isNaN(wft)&&wft>0)b.w=Math.round(wft*6);
+    if(!isNaN(hft)&&hft>0)b.h=Math.round(hft*6);
+    renderBooth(b);
+  });
+  closeEdit(); selectBooth(eid); autosave();
+}
+document.getElementById('edit-modal').addEventListener('click',e=>{if(e.target===document.getElementById('edit-modal'))closeEdit();});
+document.getElementById('e-name').addEventListener('keydown',e=>{if(e.key==='Enter')confirmEdit();if(e.key==='Escape')closeEdit();});
+
+// ── SAVE / LOAD ────────────────────────────────────────────
+function autosave(){
+  localStorage.setItem('nhcfm_map_FINAL',JSON.stringify(booths.map(b=>({id:b.id,label:b.label,cat:b.cat,zone:b.zone,notes:b.notes,group:b.group||'',x:b.x,y:b.y,rot:b.rot,w:b.w,h:b.h}))));
+}
+function saveLayout(){autosave();alert('✓ Saved!');}
+function bakeDefault(){
+  const data=JSON.stringify(booths.map(b=>({id:b.id,label:b.label,cat:b.cat,zone:b.zone,notes:b.notes||'',group:b.group||'',x:Math.round(b.x),y:Math.round(b.y),rot:b.rot,w:b.w,h:b.h})),null,2);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+  a.download='nhcfm_map_default.json'; a.click();
+  localStorage.setItem('nhcfm_map_BAKED',data);
+  alert('✓ Layout baked! JSON backup downloaded.');
+}
+function resetLayout(){
+  if(!confirm('Reset to last baked default?'))return;
+  localStorage.removeItem('nhcfm_map_FINAL');
+  LAYER.innerHTML=''; booths=[]; initLayout();
+}
+
+function initLayout(){
+  const saved=localStorage.getItem('nhcfm_map_FINAL')
+    ||localStorage.getItem('nhcfm_map_BAKED');
+  if(saved){JSON.parse(saved).forEach(b=>createBooth(b));}
+}
+
+// ── AIRTABLE API ───────────────────────────────────────────
+function getKey(){return localStorage.getItem('nhcfm_at_key')||'';}
+function saveKey(){
+  const k=document.getElementById('api-key').value.trim();
+  if(!k){alert('Enter your API key');return;}
+  localStorage.setItem('nhcfm_at_key',k);
+  setStatus('Key saved. Loading dates...');
+  loadDates();
+}
+function setStatus(msg){document.getElementById('status').textContent=msg;}
+
+function atFetch(url){
+  return fetch('https://api.airtable.com/v0/'+url,{
+    headers:{'Authorization':'Bearer '+getKey(),'Content-Type':'application/json'}
+  }).then(r=>{if(!r.ok)throw new Error('API error: '+r.status);return r.json();});
+}
+
+function loadDates(){
+  const key=getKey(); if(!key){setStatus('Enter API key above');return;}
+  document.getElementById('api-key').value=key;
+  setStatus('Loading dates...');
+  atFetch(BASE_ID+'/'+MKTDAYS_TBL+'?fields[]=Market%20Dates&sort[0][field]=Market%20Dates&sort[0][direction]=asc')
+  .then(data=>{
+    const sel=document.getElementById('date-select');
+    sel.innerHTML='<option value="">— Select date —</option>';
+    data.records.forEach(r=>{
+      const dv=r.fields['Market Dates']; if(!dv)return;
+      const opt=document.createElement('option');
+      opt.value=r.id;
+      const d=new Date(dv);
+      opt.textContent=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+      sel.appendChild(opt);
+    });
+    setStatus('Ready — select a date and click Load');
+  })
+  .catch(e=>{setStatus('Error: '+e.message);console.error(e);});
+}
+
+function loadFromAirtable(){
+  const recId=document.getElementById('date-select').value;
+  if(!recId){alert('Select a market date first');return;}
+  setStatus('Loading assignments...');
+
+  atFetch(BASE_ID+'/'+MKTASSIGN_TBL+'?fields[]=Vendor&fields[]=MapRow&fields[]=Tents&fields[]=Zone&fields[]=Status&fields[]=Noshow&fields[]=BoothPosition&fields[]=MarketDate&pageSize=100')
+  .then(data=>{
+    const assignments=data.records.filter(r=>{
+      const md=r.fields['MarketDate'];
+      return md&&Array.isArray(md)&&md.indexOf(recId)!==-1;
+    });
+    if(!assignments.length){setStatus('No assignments for this date');return;}
+    setStatus('Found '+assignments.length+' assignments — loading vendors...');
+
+    const vendorIds=[...new Set(assignments.map(a=>a.fields['Vendor']&&a.fields['Vendor'][0]).filter(Boolean))];
+    const vendorFilter='OR('+vendorIds.map(id=>'RECORD_ID()="'+id+'"').join(',')+')';
+
+    return atFetch(BASE_ID+'/'+VENDORS_TBL+'?filterByFormula='+encodeURIComponent(vendorFilter)+'&fields[]=Name&fields[]=MapCategory&fields[]=DefaultTents')
+    .then(vdata=>{
+      const vmap={};
+      vdata.records.forEach(v=>{
+        vmap[v.id]={
+          name:v.fields['Name']||'?',
+          cat:Array.isArray(v.fields['MapCategory'])?v.fields['MapCategory'][0]:(v.fields['MapCategory']||'Permanent'),
+          tents:v.fields['DefaultTents']||1
+        };
+      });
+
+      // Clear existing booths and re-place from Airtable
+      LAYER.innerHTML=''; booths=[];
+
+      // Group by row
+      const byRow={};
+      assignments.forEach(a=>{
+        const vid=a.fields['Vendor']&&a.fields['Vendor'][0];
+        const vendor=vmap[vid]||{name:'Unknown',cat:'Permanent',tents:1};
+        const row=a.fields['MapRow']||'Unassigned';
+        if(!byRow[row])byRow[row]=[];
+        byRow[row].push({name:vendor.name,cat:vendor.cat,tents:a.fields['Tents']||vendor.tents});
+      });
+
+      // Place vendors in rows
+      Object.keys(ROW_DEFS).forEach(rowName=>{
+        const def=ROW_DEFS[rowName];
+        const vendors=byRow[rowName]||[];
+        const isHoriz=def.dir==='h';
+        for(let i=0;i<def.slots;i++){
+          const x=isHoriz?def.startX+i*B:def.startX;
+          const y=isHoriz?def.y:def.y+i*(B+2);
+          const v=vendors[i]||null;
+          if(v){
+            createBooth({zone:rowName.toLowerCase().replace(/ /g,'_'),cat:v.cat,label:v.name,x,y,rot:def.rot,w:B,h:B});
+          } else {
+            // Empty slot placeholder
+            createBooth({zone:'empty',cat:'default',label:'',x,y,rot:def.rot,w:B,h:B});
+          }
+        }
+      });
+
+      // Unassigned
+      if(byRow['Unassigned']){
+        const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+        t.setAttribute('x','200');t.setAttribute('y','870');
+        t.setAttribute('font-family','system-ui');t.setAttribute('font-size','8');
+        t.setAttribute('fill','#c0392b');t.setAttribute('font-weight','700');
+        t.textContent='⚠ Unassigned: '+byRow['Unassigned'].map(v=>v.name).join(', ');
+        LAYER.appendChild(t);
+      }
+
+      const dateText=document.getElementById('date-select').options[document.getElementById('date-select').selectedIndex].text;
+      setStatus('Loaded · '+assignments.length+' vendors · '+dateText);
+      autosave();
+    });
+  })
+  .catch(e=>{setStatus('Error: '+e.message);console.error(e);});
+}
+
+// ── INIT ──────────────────────────────────────────────────
+const savedKey=getKey();
+if(savedKey){document.getElementById('api-key').value=savedKey;loadDates();}
+else{setStatus('Enter API key to load dates');}
+initLayout();
+</script>
+</body>
+</html>
